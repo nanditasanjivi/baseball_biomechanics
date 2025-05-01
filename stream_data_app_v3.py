@@ -74,7 +74,7 @@ if date_from and date_to:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         adhoc_sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
         if not adhoc_sessions_df.empty:
-            st.subheader("🎯 Select an Adhoc Game Session")
+            st.subheader("Select an Adhoc Game Session")
 
             session_id_col = "sessionId" if "sessionId" in adhoc_sessions_df.columns else adhoc_sessions_df.columns[0]
             session_display_col = "sessionName" if "sessionName" in adhoc_sessions_df.columns else session_id_col

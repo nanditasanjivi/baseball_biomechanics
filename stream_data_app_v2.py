@@ -46,7 +46,7 @@ def fetch_data(token, session_id):
         return pd.DataFrame()
 
 # --- Streamlit App UI ---
-st.title("🏟️ TrackMan Game Play Viewer")
+st.title("TrackMan Game Play Viewer")
 
 # Input session ID
 session_id = st.text_input("Enter TrackMan Game Session ID", value="abc")
@@ -58,10 +58,10 @@ if session_id:
         df = fetch_data(access_token, session_id)
 
         if not df.empty:
-            st.subheader("📊 Raw Data")
+            st.subheader("Raw Data")
             st.dataframe(df)
 
-            st.subheader("🔍 Filter Data")
+            st.subheader("Filter Data")
 
             # Column selector
             filter_col = st.selectbox("Choose a column to filter", df.columns)
@@ -84,7 +84,7 @@ if session_id:
                 options = st.multiselect("Select values", df[filter_col].dropna().unique())
                 filtered_df = df[df[filter_col].isin(options)] if options else df
 
-            st.subheader("📄 Filtered Data")
+            st.subheader("Filtered Data")
             st.dataframe(filtered_df)
 
             # Download option

@@ -72,14 +72,14 @@ if date_from and date_to:
     access_token = get_access_token()
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        if not sessions_df.empty:
-            st.subheader("Select a Game Session")
+        adhoc_sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
+        if not adhoc_sessions_df.empty:
+            st.subheader("🎯 Select an Adhoc Game Session")
 
-            # Show metadata
-            session_id_col = "sessionId" if "sessionId" in sessions_df.columns else sessions_df.columns[0]
-            session_display_col = "sessionName" if "sessionName" in sessions_df.columns else session_id_col
+            session_id_col = "sessionId" if "sessionId" in adhoc_sessions_df.columns else adhoc_sessions_df.columns[0]
+            session_display_col = "sessionName" if "sessionName" in adhoc_sessions_df.columns else session_id_col
 
-            session_map = dict(zip(sessions_df[session_display_col], sessions_df[session_id_col]))
+            session_map = dict(zip(adhoc_sessions_df[session_display_col], adhoc_sessions_df[session_id_col]))
             session_choice = st.selectbox("Session", options=list(session_map.keys()))
             chosen_session_id = session_map[session_choice]
 

@@ -4,15 +4,16 @@ import pandas as pd
 import requests
 import io
 
-
-
-st.set_page_config(page_title="Baseball Data Viewer", layout="wide")
-
-# Load preprocessed CSV
 url = st.secrets["PRIVATE_CSV_URL"]
 
 response = requests.get(url)
-df = pd.read_csv(io.StringIO(response.text))
+st.text(response.status_code)   # Should be 200
+st.text(response.headers["Content-Type"])  # Should be 'text/csv' or 'application/octet-stream'
+st.text(response.text[:500])  # Show the first 500 characters of the response
+
+
+
+st.set_page_config(page_title="Baseball Data Viewer", layout="wide")
 
 st.title("Baseball Data Dashboard")
 

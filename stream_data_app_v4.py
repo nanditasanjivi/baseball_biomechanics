@@ -64,7 +64,7 @@ if date_from and date_to:
     token = get_access_token()
     if token:
         sessions_df = fetch_sessions(token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        adhoc_sessions = sessions_df[sessions_df["sessionType"] == "Adhoc"]
+        adhoc_sessions = sessions_df[sessions_df["sessionType"].isin(["Adhoc", "Pitching"])]
 
         if not adhoc_sessions.empty:
             st.subheader("Select Game Session")

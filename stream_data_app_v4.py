@@ -7,11 +7,11 @@ api_secrets = st.secrets["trackman_api"]
 auth_url = api_secrets["auth_url"]
 client_id = api_secrets["client_id"]
 client_secret = api_secrets["client_secret"]
-base_play_url = api_secrets["base_url"]  # /game/plays
-ball_url_base = api_secrets["balls_url_base"]  # new entry: /game/balls
+plays_url = api_secrets["plays_url"]
+balls_url = api_secrets["balls_url"]
 session_query_url = api_secrets["session_query_url"]
 
-# Authenticate
+# --- API Authentication ---
 @st.cache_data
 def get_access_token():
     auth_data = {
@@ -20,9 +20,9 @@ def get_access_token():
         "grant_type": "client_credentials"
     }
     response = requests.post(auth_url, data=auth_data)
-    return response.json()["access_token"] if response.status_code == 200 else None
+    return response.json().get("access_token") if response.status_code == 200 else None
 
-# Fetch sessions
+# --- Fetch Sessions ---
 @st.cache_data
 def fetch_sessions(token, date_from, date_to):
     headers = {
@@ -38,24 +38,24 @@ def fetch_sessions(token, date_from, date_to):
     response = requests.post(session_query_url, headers=headers, json=payload)
     return pd.DataFrame(response.json()) if response.status_code == 200 else pd.DataFrame()
 
-# Fetch plays
+# --- Fetch Plays ---
 @st.cache_data
-def fetch_play_data(token, session_id):
-    headers = {"Authorization": f"Bearer {token}"}
-    url = f"{base_play_url}/{session_id}"
-    r = requests.get(url, headers=headers)
-    return pd.json_normalize(r.json()) if r.status_code == 200 else pd.DataFrame()
+def fetch_plays(token, session_id):
+    url = f"{plays_url}/{session_id}"
+    headers = {"Authorization": f"Bearer {token}", "accept": "application/json"}
+    response = requests.get(url, headers=headers)
+    return pd.json_normalize(response.json()) if response.status_code == 200 else pd.DataFrame()
 
-# Fetch balls
+# --- Fetch Balls ---
 @st.cache_data
-def fetch_ball_data(token, session_id):
-    headers = {"Authorization": f"Bearer {token}"}
-    url = f"{ball_url_base}/{session_id}"
-    r = requests.get(url, headers=headers)
-    return pd.json_normalize(r.json()) if r.status_code == 200 else pd.DataFrame()
+def fetch_balls(token, session_id):
+    url = f"{balls_url}/{session_id}"
+    headers = {"Authorization": f"Bearer {token}", "accept": "application/json"}
+    response = requests.get(url, headers=headers)
+    return pd.json_normalize(response.json()) if response.status_code == 200 else pd.DataFrame()
 
-# Streamlit UI
-st.title("TrackMan Play + Ball Data Explorer")
+# --- Streamlit UI ---
+st.title("⚾ TrackMan Play & Ball Data Explorer")
 
 date_from = st.date_input("Start Date", pd.to_datetime("2025-01-03"))
 date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
@@ -64,43 +64,41 @@ if date_from and date_to:
     token = get_access_token()
     if token:
         sessions_df = fetch_sessions(token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        adhoc_sessions = sessions_df[sessions_df["sessionType"].isin(["Adhoc", "Pitching"])]
+        if not sessions_df.empty:
+            st.subheader("Select a Game Session")
+            session_display_col = "sessionName" if "sessionName" in sessions_df.columns else sessions_df.columns[0]
+            session_id_col = "sessionId" if "sessionId" in sessions_df.columns else sessions_df.columns[0]
+            session_map = dict(zip(sessions_df[session_display_col], sessions_df[session_id_col]))
+            session_choice = st.selectbox("Session", options=list(session_map.keys()))
+            selected_session_id = session_map[session_choice]
 
-        if not adhoc_sessions.empty:
-            st.subheader("Select Game Session")
-            session_map = dict(zip(adhoc_sessions["sessionName"], adhoc_sessions["sessionId"]))
-            session_name = st.selectbox("Session", options=list(session_map.keys()))
-            session_id = session_map[session_name]
+            st.success(f"Selected Session ID: {selected_session_id}")
 
-            play_df = fetch_play_data(token, session_id)
-            ball_df = fetch_ball_data(token, session_id)
+            # Fetch and merge plays + balls
+            plays_df = fetch_plays(token, selected_session_id)
+            balls_df = fetch_balls(token, selected_session_id)
 
-            if not play_df.empty and not ball_df.empty:
-                merged_df = pd.merge(play_df, ball_df, on="playId", suffixes=("_play", "_ball"), how="inner")
+            if not plays_df.empty and not balls_df.empty:
+                merged_df = pd.merge(plays_df, balls_df, on="playId", suffixes=("_play", "_ball"))
 
-                st.subheader("Merged Play + Ball Data")
+                st.subheader("📊 Merged Play & Ball Data")
                 st.dataframe(merged_df)
 
-                # Filter UI
-                filter_col = st.selectbox("Filter by column", merged_df.columns)
-
+                # Filtering
+                st.subheader("🔍 Filter Merged Data")
+                filter_col = st.selectbox("Filter by Column", merged_df.columns)
                 if pd.api.types.is_numeric_dtype(merged_df[filter_col]):
-                    min_val = float(merged_df[filter_col].min())
-                    max_val = float(merged_df[filter_col].max())
-                    selected_range = st.slider("Select range", min_val, max_val, (min_val, max_val))
-                    filtered = merged_df[merged_df[filter_col].between(*selected_range)]
+                    min_val, max_val = float(merged_df[filter_col].min()), float(merged_df[filter_col].max())
+                    selected = st.slider("Select Range", min_val, max_val, (min_val, max_val))
+                    filtered = merged_df[merged_df[filter_col].between(*selected)]
                 else:
-                    choices = st.multiselect("Select values", merged_df[filter_col].dropna().unique())
-                    filtered = merged_df[merged_df[filter_col].isin(choices)] if choices else merged_df
+                    options = st.multiselect("Select values", merged_df[filter_col].dropna().unique())
+                    filtered = merged_df[merged_df[filter_col].isin(options)] if options else merged_df
 
-                st.subheader("Filtered Data")
+                st.subheader("📄 Filtered Merged Results")
                 st.dataframe(filtered)
 
-                st.download_button("Download CSV", filtered.to_csv(index=False), "merged_data.csv", "text/csv")
-
+                st.download_button("📥 Download CSV", filtered.to_csv(index=False), "merged_data.csv", "text/csv")
             else:
-                st.warning("Missing play or ball data for selected session.")
-        else:
-            st.warning("No Adhoc sessions in selected range.")
-    else:
-        st.error("Authentication failed.")
+                st.warning("No play or ball data found for this session.")
+

@@ -10,7 +10,7 @@ client_secret = api_secrets["client_secret"]
 base_url = api_secrets["base_url"]
 session_query_url = api_secrets["session_query_url"]
 
-# Authentication
+# Authenticate
 @st.cache_data
 def get_access_token():
     auth_data = {
@@ -25,13 +25,13 @@ def get_access_token():
         st.error(f"Auth error: {response.status_code} - {response.text}")
         return None
 
-# Fetch sessions
+# Fetch session metadata
 @st.cache_data
 def fetch_sessions(token, date_from, date_to):
     headers = {
         "Authorization": f"Bearer {token}",
-        "accept": "text/plain",
-        "Content-Type": "application/json-patch+json"
+        "accept": "application/json",
+        "Content-Type": "application/json"
     }
     payload = {
         "sessionType": "All",
@@ -42,22 +42,9 @@ def fetch_sessions(token, date_from, date_to):
     if response.status_code == 200:
         return pd.DataFrame(response.json())
     else:
-        st.error(f"Session fetch error: {response.status_code} - {response.text}")
+        st.error(f"Session metadata error: {response.status_code} - {response.text}")
         return pd.DataFrame()
 
-# Fetch session metadata
-@st.cache_data
-def fetch_session_metadata(token, session_id):
-    url = f"{base_url}/game/session/{session_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"Session metadata error: {response.status_code} - {response.text}")
-        return {}
-
-# Fetch plays
 @st.cache_data
 def fetch_play_data(token, session_id):
     url = f"{base_url}/game/plays/{session_id}"
@@ -69,7 +56,6 @@ def fetch_play_data(token, session_id):
         st.error(f"Play data error: {response.status_code} - {response.text}")
         return pd.DataFrame()
 
-# Fetch ball data
 @st.cache_data
 def fetch_ball_data(token, session_id):
     url = f"{base_url}/game/balls/{session_id}"
@@ -84,50 +70,45 @@ def fetch_ball_data(token, session_id):
 # UI
 st.title("TrackMan Game Data Explorer")
 
-# Date inputs
+# Date range selector
 date_from = st.date_input("Start Date", pd.to_datetime("2025-01-01"))
-date_to = st.date_input("End Date", pd.to_datetime("2025-01-31"))
+date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
 
 if date_from and date_to:
     token = get_access_token()
     if token:
         sessions_df = fetch_sessions(token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        if not sessions_df.empty:
-            st.subheader("Select Game Session")
-            session_display_col = "sessionName" if "sessionName" in sessions_df.columns else "sessionId"
-            session_id_col = "sessionId"
-            session_map = dict(zip(sessions_df[session_display_col], sessions_df[session_id_col]))
-            session_choice = st.selectbox("Session", options=list(session_map.keys()))
-            session_id = session_map[session_choice]
+        adhoc_sessions = sessions_df[sessions_df["sessionType"] == "Adhoc"]
 
-            # Show session metadata
-            metadata = fetch_session_metadata(token, session_id)
-            st.markdown("### Session Metadata")
-            st.json(metadata)
+        if not adhoc_sessions.empty:
+            session_display_col = "sessionName" if "sessionName" in adhoc_sessions.columns else "sessionId"
+            session_map = dict(zip(adhoc_sessions[session_display_col], adhoc_sessions["sessionId"]))
+            session_choice = st.selectbox("Select Adhoc Session", options=list(session_map.keys()))
+            selected_session_id = session_map[session_choice]
 
-            # Fetch and merge data
-            play_df = fetch_play_data(token, session_id)
-            ball_df = fetch_ball_data(token, session_id)
+            play_df = fetch_play_data(token, selected_session_id)
+            ball_df = fetch_ball_data(token, selected_session_id)
 
-            if not play_df.empty and not ball_df.empty and "playId" in ball_df.columns:
-                merged_df = pd.merge(play_df, ball_df, on="playId", how="left")
-                st.subheader("Merged Play and Ball Data")
-                st.dataframe(merged_df)
+            if not play_df.empty:
+                st.subheader("Play-by-Play Data")
+                st.dataframe(play_df)
 
-                st.subheader("Filter")
-                col_to_filter = st.selectbox("Filter by Column", merged_df.columns)
-                if pd.api.types.is_numeric_dtype(merged_df[col_to_filter]):
-                    min_val, max_val = float(merged_df[col_to_filter].min()), float(merged_df[col_to_filter].max())
-                    selected = st.slider("Select Range", min_val, max_val, (min_val, max_val))
-                    filtered_df = merged_df[merged_df[col_to_filter].between(selected[0], selected[1])]
+                if "batter.name" in play_df.columns:
+                    player_names = play_df["batter.name"].dropna().unique()
+                    selected_player = st.selectbox("Select Player", player_names)
+
+                    if not ball_df.empty:
+                        merged_df = pd.merge(play_df, ball_df, on="playId", how="inner")
+                        filtered_df = merged_df[merged_df["batter.name"] == selected_player]
+
+                        st.subheader("Ball Data for Selected Player")
+                        st.dataframe(filtered_df)
+                        st.download_button("Download Player Ball Data", filtered_df.to_csv(index=False), "player_ball_data.csv", "text/csv")
+                    else:
+                        st.warning("No ball data found for the selected session.")
                 else:
-                    options = st.multiselect("Choose Values", merged_df[col_to_filter].dropna().unique())
-                    filtered_df = merged_df[merged_df[col_to_filter].isin(options)] if options else merged_df
-
-                st.subheader("Filtered Results")
-                st.dataframe(filtered_df)
-                st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered.csv", "text/csv")
+                    st.warning("No batter name data to filter on.")
             else:
-                st.warning("Play or Ball data is empty or not mergeable.")
+                st.warning("No play-by-play data found for this session.")
         else:
-            st.warning("No sessions found.")
+            st.warning("No 'Adhoc' sessions found in the selected date range.")

@@ -7,28 +7,24 @@ api_secrets = st.secrets["trackman_api"]
 auth_url = api_secrets["auth_url"]
 client_id = api_secrets["client_id"]
 client_secret = api_secrets["client_secret"]
-plays_base_url = api_secrets["base_url"]  # This is for plays
+plays_base_url = api_secrets["base_url"]
 session_query_url = api_secrets["session_query_url"]
 
-# Construct ball data base URL from plays_base_url
+# Derive balls URL from plays URL
 balls_base_url = plays_base_url.replace("/plays", "/balls")
 
-# Authenticate
 @st.cache_data
 def get_access_token():
-    auth_data = {
+    response = requests.post(auth_url, data={
         "client_id": client_id,
         "client_secret": client_secret,
         "grant_type": "client_credentials"
-    }
-    response = requests.post(auth_url, data=auth_data)
+    })
     if response.status_code == 200:
         return response.json()["access_token"]
-    else:
-        st.error(f"Auth error: {response.status_code} - {response.text}")
-        return None
+    st.error("Failed to authenticate.")
+    return None
 
-# Fetch sessions
 @st.cache_data
 def fetch_sessions(token, date_from, date_to):
     headers = {
@@ -41,86 +37,72 @@ def fetch_sessions(token, date_from, date_to):
         "utcDateFrom": date_from,
         "utcDateTo": date_to
     }
-    response = requests.post(session_query_url, headers=headers, json=payload)
-    if response.status_code == 200:
-        return pd.DataFrame(response.json())
-    else:
-        st.error(f"Session fetch error: {response.status_code} - {response.text}")
-        return pd.DataFrame()
+    res = requests.post(session_query_url, headers=headers, json=payload)
+    if res.status_code == 200:
+        return pd.DataFrame(res.json())
+    st.error("Failed to fetch sessions.")
+    return pd.DataFrame()
 
-# Fetch plays
 @st.cache_data
 def fetch_plays(token, session_id):
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{plays_base_url}/{session_id}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return pd.json_normalize(response.json())
-    else:
-        st.error(f"Plays fetch error: {response.status_code} - {response.text}")
-        return pd.DataFrame()
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        return pd.json_normalize(res.json())
+    st.error("Failed to fetch plays.")
+    return pd.DataFrame()
 
-# Fetch balls
 @st.cache_data
 def fetch_balls(token, session_id):
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{balls_base_url}/{session_id}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return pd.json_normalize(response.json())
-    else:
-        st.error(f"Balls fetch error: {response.status_code} - {response.text}")
-        return pd.DataFrame()
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        return pd.json_normalize(res.json())
+    st.error("Failed to fetch balls.")
+    return pd.DataFrame()
 
 # UI
-st.title("TrackMan Game Data Viewer")
+st.title("TrackMan Game Data: Pitcher View")
 
-# Step 1: Select Date Range
-date_from = st.date_input("Start Date", pd.to_datetime("2025-01-01"))
-date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
+date_from = st.date_input("Start Date")
+date_to = st.date_input("End Date")
 
 if date_from and date_to:
     token = get_access_token()
     if token:
-        sessions_df = fetch_sessions(token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        adhoc_sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-        if not adhoc_sessions_df.empty:
-            st.subheader("Select Session")
-            session_display_col = "sessionName" if "sessionName" in adhoc_sessions_df.columns else "sessionId"
-            session_map = dict(zip(adhoc_sessions_df[session_display_col], adhoc_sessions_df["sessionId"]))
-            session_choice = st.selectbox("Session", options=list(session_map.keys()))
-            session_id = session_map[session_choice]
+        sessions_df = fetch_sessions(
+            token,
+            f"{date_from}T00:00:00Z",
+            f"{date_to}T23:59:59Z"
+        )
 
-            # Step 2: Fetch Data
-            plays_df = fetch_plays(token, session_id)
-            balls_df = fetch_balls(token, session_id)
+        if not sessions_df.empty:
+            st.subheader("Select Session")
+            session_map = dict(zip(sessions_df["sessionId"], sessions_df["sessionId"]))
+            selected_session = st.selectbox("Session", list(session_map.values()))
+
+            plays_df = fetch_plays(token, selected_session)
+            balls_df = fetch_balls(token, selected_session)
 
             if not plays_df.empty:
-                st.subheader("Filter by Player ID")
+                st.subheader("Filter by Pitcher ID")
+                unique_pitchers = plays_df["pitcher.id"].dropna().unique()
+                selected_pitcher = st.selectbox("Pitcher ID", unique_pitchers)
 
-                # Combine unique pitcher and batter IDs
-                all_ids = pd.Series(plays_df["pitcher.id"].dropna().tolist() + plays_df["batter.id"].dropna().tolist()).unique()
-                selected_player_id = st.selectbox("Select Player ID", all_ids)
-
-                # Filter plays
-                filtered_plays = plays_df[
-                    (plays_df["pitcher.id"] == selected_player_id) |
-                    (plays_df["batter.id"] == selected_player_id)
-                ]
-
-                # Filter balls based on matching playId
+                filtered_plays = plays_df[plays_df["pitcher.id"] == selected_pitcher]
                 filtered_balls = balls_df[balls_df["playId"].isin(filtered_plays["playID"])]
 
-                st.subheader("Filtered Plays")
+                st.markdown("### Filtered Plays")
                 st.dataframe(filtered_plays)
 
-                st.subheader("Filtered Balls")
+                st.markdown("### Filtered Balls")
                 st.dataframe(filtered_balls)
 
-                # Download
-                st.download_button("Download Plays CSV", filtered_plays.to_csv(index=False), "filtered_plays.csv", "text/csv")
-                st.download_button("Download Balls CSV", filtered_balls.to_csv(index=False), "filtered_balls.csv", "text/csv")
+                st.download_button("Download Plays CSV", filtered_plays.to_csv(index=False), "plays.csv", "text/csv")
+                st.download_button("Download Balls CSV", filtered_balls.to_csv(index=False), "balls.csv", "text/csv")
             else:
-                st.warning("No play data found for this session.")
+                st.warning("No plays found for this session.")
         else:
-            st.warning("No Adhoc sessions found.")
+            st.warning("No sessions found in this date range.")

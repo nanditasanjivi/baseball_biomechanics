@@ -7,11 +7,11 @@ api_secrets = st.secrets["trackman_api"]
 auth_url = api_secrets["auth_url"]
 client_id = api_secrets["client_id"]
 client_secret = api_secrets["client_secret"]
-base_url_plays = api_secrets["base_url"]          # plays endpoint
-session_query_url = api_secrets["session_query_url"]  # sessions endpoint
-base_url_balls = "https://dataapi.trackmanbaseball.com/api/v1/data/game/balls"  # balls endpoint (fixed)
+base_play_url = api_secrets["base_url"]  # plays endpoint
+session_query_url = api_secrets["session_query_url"]
+base_ball_url = base_play_url.replace("/plays", "/balls")  # balls endpoint
 
-# Authenticate and get access token
+# Authenticate
 @st.cache_data(show_spinner=False)
 def get_access_token():
     auth_data = {
@@ -26,7 +26,7 @@ def get_access_token():
         st.error(f"Auth error: {response.status_code} - {response.text}")
         return None
 
-# Fetch session metadata
+# Fetch session metadata and flatten teams properly
 @st.cache_data(show_spinner=False)
 def fetch_sessions(token, date_from, date_to):
     headers = {
@@ -41,39 +41,53 @@ def fetch_sessions(token, date_from, date_to):
     }
     response = requests.post(session_query_url, headers=headers, json=payload)
     if response.status_code == 200:
-        return pd.DataFrame(response.json())
+        data = response.json()
+        df = pd.json_normalize(data)
+        # Extract nested team names properly
+        df["homeTeam.name"] = df["homeTeam"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
+        df["awayTeam.name"] = df["awayTeam"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
+        return df
     else:
         st.error(f"Session fetch error: {response.status_code} - {response.text}")
         return pd.DataFrame()
 
-# Fetch plays data for a session
+# Fetch plays data
 @st.cache_data(show_spinner=False)
-def fetch_plays(token, session_id):
-    headers = {"Authorization": f"Bearer {token}", "accept": "application/json"}
-    url = f"{base_url_plays}/{session_id}"
+def fetch_play_data(token, session_id):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "accept": "application/json"
+    }
+    url = f"{base_play_url}/{session_id}"
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         data = response.json()
         return pd.json_normalize(data) if isinstance(data, list) else pd.DataFrame()
     else:
-        st.error(f"Plays fetch error: {response.status_code} - {response.text}")
+        st.error(f"Play data fetch error: {response.status_code} - {response.text}")
         return pd.DataFrame()
 
-# Fetch balls data for a session
+# Fetch balls data
 @st.cache_data(show_spinner=False)
-def fetch_balls(token, session_id):
-    headers = {"Authorization": f"Bearer {token}", "accept": "application/json"}
-    url = f"{base_url_balls}/{session_id}"
+def fetch_ball_data(token, session_id):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "accept": "application/json"
+    }
+    url = f"{base_ball_url}/{session_id}"
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         data = response.json()
-        return pd.json_normalize(data) if isinstance(data, list) else pd.DataFrame()
+        df = pd.json_normalize(data) if isinstance(data, list) else pd.DataFrame()
+        # Filter to only 'Pitch' kind
+        if not df.empty:
+            df = df[df["kind"] == "Pitch"]
+        return df
     else:
-        st.error(f"Balls fetch error: {response.status_code} - {response.text}")
+        st.error(f"Ball data fetch error: {response.status_code} - {response.text}")
         return pd.DataFrame()
 
-# --- Streamlit app UI ---
-
+# Streamlit UI
 st.title("TrackMan Game Data Explorer")
 
 # Step 1: Select Date Range
@@ -84,76 +98,63 @@ if date_from and date_to:
     access_token = get_access_token()
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
+        adhoc_sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
 
-        if not sessions_df.empty:
-            # Build display string: "HomeTeam vs AwayTeam | sessionId"
-            def format_session_row(row):
-                home_team = row.get("homeTeam.name", "Unknown Home")
-                away_team = row.get("awayTeam.name", "Unknown Away")
-                session_id = row.get("sessionId", "")
-                return f"{home_team} vs {away_team} | {session_id}"
-
-            sessions_df["session_display"] = sessions_df.apply(format_session_row, axis=1)
-            session_map = dict(zip(sessions_df["session_display"], sessions_df["sessionId"]))
-
+        if not adhoc_sessions_df.empty:
             st.subheader("Select Game Session")
+
+            # Display teams with sessionId for clarity
+            adhoc_sessions_df["session_display"] = (
+                adhoc_sessions_df["homeTeam.name"].fillna("Unknown Home") + " vs " +
+                adhoc_sessions_df["awayTeam.name"].fillna("Unknown Away") +
+                " (" + adhoc_sessions_df["sessionId"] + ")"
+            )
+
+            session_map = dict(zip(adhoc_sessions_df["session_display"], adhoc_sessions_df["sessionId"]))
             session_choice = st.selectbox("Session", options=list(session_map.keys()))
             chosen_session_id = session_map[session_choice]
 
-            # Fetch plays and balls data
-            plays_df = fetch_plays(access_token, chosen_session_id)
-            balls_df = fetch_balls(access_token, chosen_session_id)
+            # Fetch plays and balls for selected session
+            play_df = fetch_play_data(access_token, chosen_session_id)
+            ball_df = fetch_ball_data(access_token, chosen_session_id)
 
-            if plays_df.empty:
-                st.warning("No plays data found for this session.")
-            if balls_df.empty:
-                st.warning("No balls data found for this session.")
+            if not play_df.empty and not ball_df.empty:
+                # Prepare pitcher filter with pitcher name and id
+                play_df["pitcherID"] = play_df["pitcher.id"]
+                play_df["pitcherName"] = play_df["pitcher.name"]
+                pitchers = play_df[["pitcherID", "pitcherName"]].drop_duplicates()
+                pitchers["display"] = pitchers["pitcherName"] + " (" + pitchers["pitcherID"] + ")"
+                pitcher_map = dict(zip(pitchers["display"], pitchers["pitcherID"]))
 
-            if not plays_df.empty and not balls_df.empty:
                 st.subheader("Filter by Pitcher")
-
-                # Create pitcher display strings: "Name (ID)"
-                plays_df["pitcher_display"] = plays_df.apply(
-                    lambda r: f'{r.get("pitcher.name", "Unknown")} ({r.get("pitcher.id", "")})', axis=1
-                )
-
-                pitcher_map = dict(zip(plays_df["pitcher_display"], plays_df["pitcher.id"]))
                 selected_pitchers = st.multiselect("Select Pitcher(s)", options=list(pitcher_map.keys()))
 
                 if selected_pitchers:
-                    selected_pitcher_ids = [pitcher_map[name] for name in selected_pitchers]
+                    selected_ids = [pitcher_map[name] for name in selected_pitchers]
+                    filtered_plays = play_df[play_df["pitcherID"].isin(selected_ids)]
+                    filtered_balls = ball_df[ball_df["playId"].isin(filtered_plays["playID"])]
 
-                    # Filter plays by selected pitcher IDs
-                    filtered_plays = plays_df[plays_df["pitcher.id"].isin(selected_pitcher_ids)]
+                    # Merge balls first, then plays (as requested)
+                    merged_df = pd.merge(
+                        filtered_balls,
+                        filtered_plays,
+                        left_on="playId",
+                        right_on="playID",
+                        how="inner",
+                        suffixes=("_ball", "_play")
+                    )
 
-                    # Filter balls: kind == 'Pitch' AND playId in filtered plays' playID
-                    filtered_balls = balls_df[
-                        (balls_df["kind"] == "Pitch") & (balls_df["playId"].isin(filtered_plays["playID"]))
-                    ]
+                    # Sort by utcDateTime chronologically
+                    merged_df = merged_df.sort_values("utcDateTime")
 
-                    if filtered_plays.empty or filtered_balls.empty:
-                        st.warning("No data found for selected pitcher(s) with kind 'Pitch'.")
-                    else:
-                        # Merge plays (left) with balls (right) on playID
-                        combined_df = pd.merge(
-                            filtered_plays,
-                            filtered_balls,
-                            left_on="playID",
-                            right_on="playId",
-                            suffixes=("_play", "_ball")
-                        )
+                    st.subheader("Merged Play and Ball Data")
+                    st.dataframe(merged_df)
 
-                        # Sort by utcDateTime ascending (chronological)
-                        combined_df["utcDateTime"] = pd.to_datetime(combined_df["utcDateTime"])
-                        combined_df = combined_df.sort_values(by="utcDateTime")
-
-                        st.subheader("Combined Balls and Plays Data (Filtered by Pitcher)")
-                        st.dataframe(combined_df)
-
-                        csv = combined_df.to_csv(index=False)
-                        st.download_button("Download Combined Data as CSV", csv, "trackman_combined_data.csv", "text/csv")
+                    csv_data = merged_df.to_csv(index=False)
+                    st.download_button("Download CSV", csv_data, "merged_filtered.csv", "text/csv")
                 else:
                     st.info("Select at least one pitcher to filter data.")
-
+            else:
+                st.warning("No play or ball data found for this session.")
         else:
-            st.warning("No sessions found in the selected date range.")
+            st.warning("No Adhoc sessions found in the selected date range.")

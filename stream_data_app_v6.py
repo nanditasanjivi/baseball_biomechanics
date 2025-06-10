@@ -1,134 +1,162 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
 import matplotlib.pyplot as plt
-from datetime import datetime
-from dateutil import parser
-
-st.title("TrackMan Game Data Viewer")
+import seaborn as sns
 
 # Load secrets
-client_id = st.secrets["trackman_api"]["client_id"]
-client_secret = st.secrets["trackman_api"]["client_secret"]
-auth_url = st.secrets["trackman_api"]["auth_url"]
-base_url = st.secrets["trackman_api"]["base_url"]
-session_query_url = st.secrets["trackman_api"]["session_query_url"]
+api_secrets = st.secrets["trackman_api"]
+auth_url = api_secrets["auth_url"]
+client_id = api_secrets["client_id"]
+client_secret = api_secrets["client_secret"]
+base_url = api_secrets["base_url"]
+session_query_url = api_secrets["session_query_url"]
 
-# Get access token
+# Authenticate
+@st.cache_data
 def get_access_token():
-    data = {
-        'grant_type': 'client_credentials',
-        'client_id': client_id,
-        'client_secret': client_secret
+    auth_data = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "client_credentials"
     }
-    response = requests.post(auth_url, data=data)
-    return response.json().get("access_token")
+    response = requests.post(auth_url, data=auth_data)
+    if response.status_code == 200:
+        return response.json()["access_token"]
+    else:
+        st.error(f"Auth error: {response.status_code} - {response.text}")
+        return None
 
-# Query sessions
-def get_sessions(token, start_date, end_date):
+# Fetch sessions
+@st.cache_data
+def fetch_sessions(token, date_from, date_to):
     headers = {
         "Authorization": f"Bearer {token}",
         "accept": "text/plain",
         "Content-Type": "application/json-patch+json"
     }
-    body = {
+    payload = {
         "sessionType": "All",
-        "utcDateFrom": start_date,
-        "utcDateTo": end_date
+        "utcDateFrom": date_from,
+        "utcDateTo": date_to
     }
-    res = requests.post(session_query_url, headers=headers, json=body)
-    return res.json()
+    response = requests.post(session_query_url, headers=headers, json=payload)
+    if response.status_code == 200:
+        return pd.DataFrame(response.json())
+    else:
+        st.error(f"Session fetch error: {response.status_code} - {response.text}")
+        return pd.DataFrame()
 
-# Get plays for a session
-def get_plays(session_id, token):
-    url = f"https://dataapi.trackmanbaseball.com/api/v1/data/game/plays/{session_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    res = requests.get(url, headers=headers)
-    return res.json()
+# Fetch plays
+@st.cache_data
+def fetch_plays(token, session_id):
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    url = f"{base_url}/{session_id}"
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return pd.DataFrame(response.json())
+    else:
+        st.error(f"Plays fetch error: {response.status_code} - {response.text}")
+        return pd.DataFrame()
 
-# Get balls for a session
-def get_balls(session_id, token):
+# Fetch balls
+@st.cache_data
+
+def fetch_balls(token, session_id):
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
     url = f"https://dataapi.trackmanbaseball.com/api/v1/data/game/balls/{session_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    res = requests.get(url, headers=headers)
-    return res.json()
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        return pd.json_normalize(data)
+    else:
+        st.error(f"Balls fetch error: {response.status_code} - {response.text}")
+        return pd.DataFrame()
 
-# Inputs
-start_date = st.date_input("Start Date")
-end_date = st.date_input("End Date")
+# Streamlit UI
+st.title("TrackMan Game Data Explorer")
 
-if start_date and end_date:
-    token = get_access_token()
-    sessions = get_sessions(token, f"{start_date}T00:00:00Z", f"{end_date}T23:59:59Z")
+# Step 1: Select Date Range
+date_from = st.date_input("Start Date", pd.to_datetime("2025-01-03"))
+date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
 
-    session_options = {
-        f"{s['homeTeam'].get('name', 'Unknown')} vs {s['awayTeam'].get('name', 'Unknown')} ({s['sessionId']})": s['sessionId']
-        for s in sessions
-    }
+if date_from and date_to:
+    access_token = get_access_token()
+    if access_token:
+        sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
+        if not sessions_df.empty:
+            # Add team names to session display
+            sessions_df["sessionDisplay"] = sessions_df.apply(
+                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId'][:8]})",
+                axis=1
+            )
+            session_choice = st.selectbox("Select Session", sessions_df["sessionDisplay"])
+            session_id = sessions_df[sessions_df["sessionDisplay"] == session_choice]["sessionId"].values[0]
 
-    selected_session_label = st.selectbox("Select a session", list(session_options.keys()))
-    selected_session_id = session_options[selected_session_label]
+            play_df = fetch_plays(access_token, session_id)
+            ball_df = fetch_balls(access_token, session_id)
 
-    plays = get_plays(selected_session_id, token)
-    balls = get_balls(selected_session_id, token)
+            if not play_df.empty and not ball_df.empty:
+                # Filter balls for kind == Pitch
+                ball_df = ball_df[ball_df["kind"] == "Pitch"]
 
-    plays_df = pd.json_normalize(plays)
-    balls_df = pd.json_normalize(balls)
-    balls_df = balls_df[balls_df['kind'] == 'Pitch']
+                # Merge data (plays left, balls right) on playID
+                merged_df = pd.merge(play_df, ball_df, left_on="playID", right_on="playId", how="left")
 
-    # Merge with playID
-    merged_df = pd.merge(plays_df, balls_df, how='right', left_on='playID', right_on='playId')
+                # Sort by utcDateTime
+                merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
+                merged_df = merged_df.sort_values(by="utcDateTime")
 
-    # Show pitcher options
-    merged_df['pitcher_display'] = merged_df['pitcher.name'] + ' (' + merged_df['pitcher.id'].astype(str) + ')'
-    pitcher_options = merged_df[['pitcher_display', 'pitcher.id']].drop_duplicates().dropna()
-    selected_pitcher_display = st.selectbox("Select a pitcher", pitcher_options['pitcher_display'])
-    selected_pitcher_id = pitcher_options[pitcher_options['pitcher_display'] == selected_pitcher_display]['pitcher.id'].values[0]
+                # Add pitcher display name
+                merged_df["pitcherDisplay"] = merged_df.apply(
+                    lambda row: f"{row.get('pitcher.name', 'Unknown')} ({row.get('pitcher.id', 'NA')})", axis=1
+                )
+                pitcher_options = merged_df["pitcherDisplay"].dropna().unique()
+                selected_pitchers = st.multiselect("Select Pitcher", options=pitcher_options)
 
-    # Filter by pitcherID
-    filtered_df = merged_df[merged_df['pitcher.id'] == selected_pitcher_id].sort_values(by='utcDateTime')
+                if selected_pitchers:
+                    filtered_df = merged_df[merged_df["pitcherDisplay"].isin(selected_pitchers)]
 
-    st.subheader("Filtered Play & Ball Data")
-    st.dataframe(filtered_df)
+                    st.subheader("Filtered Plays and Balls Data")
+                    st.dataframe(filtered_df)
 
-    # Plotting
-    if not filtered_df.empty:
-        st.subheader("Pitch Metrics Over Time")
+                    # Plotting
+                    st.subheader("Pitch Metrics Line Plots")
+                    numeric_cols = [
+                        ("pitch.release.relSpeed", "Release Speed (mph)"),
+                        ("pitch.release.spinRate", "Spin Rate (rpm)"),
+                        ("pitch.release.extension", "Extension (ft)"),
+                        ("pitch.movement.horzBreak", "Horizontal Break (in)"),
+                        ("pitch.movement.vertBreak", "Vertical Break (in)"),
+                        ("pitch.effectiveVelo", "Effective Velocity (mph)")
+                    ]
 
-        filtered_df['utcDateTime'] = pd.to_datetime(filtered_df['utcDateTime'])
+                    for col, label in numeric_cols:
+                        if col in filtered_df.columns:
+                            fig, ax = plt.subplots()
+                            sns.lineplot(
+                                data=filtered_df,
+                                x="utcDateTime",
+                                y=col,
+                                hue="pitcherDisplay",
+                                marker="o",
+                                ax=ax
+                            )
+                            ax.set_title(label)
+                            ax.set_xlabel("Time")
+                            ax.set_ylabel(label)
+                            ax.legend(loc="best")
+                            st.pyplot(fig)
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(filtered_df['utcDateTime'], filtered_df['pitch.release.relSpeed'], marker='o', label='Release Speed (mph)')
-        ax.plot(filtered_df['utcDateTime'], filtered_df['pitch.release.spinRate'], marker='x', label='Spin Rate (rpm)')
-        ax.set_title('Pitch Metrics Over Time')
-        ax.set_xlabel('Date')
-        ax.set_ylabel('Value')
-        ax.legend()
-        ax.grid(True)
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
+                    st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered_pitch_data.csv", "text/csv")
 
-        st.subheader("Additional Pitch Metrics")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            fig1, ax1 = plt.subplots()
-            ax1.plot(filtered_df['utcDateTime'], filtered_df['pitch.release.extension'], marker='s', color='green')
-            ax1.set_title('Extension Over Time')
-            ax1.set_xlabel('Date')
-            ax1.set_ylabel('Extension (ft)')
-            ax1.grid(True)
-            plt.xticks(rotation=45)
-            st.pyplot(fig1)
-
-        with col2:
-            fig2, ax2 = plt.subplots()
-            ax2.plot(filtered_df['utcDateTime'], filtered_df['pitch.movement.vertBreak'], marker='^', color='purple', label='Vertical Break')
-            ax2.plot(filtered_df['utcDateTime'], filtered_df['pitch.movement.horzBreak'], marker='v', color='orange', label='Horizontal Break')
-            ax2.set_title('Pitch Break Over Time')
-            ax2.set_xlabel('Date')
-            ax2.set_ylabel('Break (inches)')
-            ax2.legend()
-            ax2.grid(True)
-            plt.xticks(rotation=45)
-            st.pyplot(fig2)
+                else:
+                    st.warning("Please select at least one pitcher to view filtered data and plots.")
+            else:
+                st.warning("No play or ball data found for selected session.")
+        else:
+            st.warning("No sessions found in the selected date range.")

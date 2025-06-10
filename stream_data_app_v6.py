@@ -84,18 +84,23 @@ if date_from and date_to:
     access_token = get_access_token()
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
-        adhoc_sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-        if not adhoc_sessions_df.empty:
+
+        if not sessions_df.empty:
+            # Build display string: "HomeTeam vs AwayTeam | sessionId"
+            def format_session_row(row):
+                home_team = row.get("homeTeam.name", "Unknown Home")
+                away_team = row.get("awayTeam.name", "Unknown Away")
+                session_id = row.get("sessionId", "")
+                return f"{home_team} vs {away_team} | {session_id}"
+
+            sessions_df["session_display"] = sessions_df.apply(format_session_row, axis=1)
+            session_map = dict(zip(sessions_df["session_display"], sessions_df["sessionId"]))
+
             st.subheader("Select Game Session")
-
-            session_id_col = "sessionId" if "sessionId" in adhoc_sessions_df.columns else adhoc_sessions_df.columns[0]
-            session_display_col = "sessionName" if "sessionName" in adhoc_sessions_df.columns else session_id_col
-
-            session_map = dict(zip(adhoc_sessions_df[session_display_col], adhoc_sessions_df[session_id_col]))
             session_choice = st.selectbox("Session", options=list(session_map.keys()))
             chosen_session_id = session_map[session_choice]
 
-            # Step 2: Fetch plays and balls data
+            # Fetch plays and balls data
             plays_df = fetch_plays(access_token, chosen_session_id)
             balls_df = fetch_balls(access_token, chosen_session_id)
 
@@ -105,26 +110,31 @@ if date_from and date_to:
                 st.warning("No balls data found for this session.")
 
             if not plays_df.empty and not balls_df.empty:
-                st.subheader("Filter by Pitcher ID")
+                st.subheader("Filter by Pitcher")
 
-                # Get unique pitcher IDs from plays data
-                pitcher_ids = plays_df["pitcher.id"].dropna().unique()
-                selected_pitcher_ids = st.multiselect("Select Pitcher ID(s)", options=pitcher_ids)
+                # Create pitcher display strings: "Name (ID)"
+                plays_df["pitcher_display"] = plays_df.apply(
+                    lambda r: f'{r.get("pitcher.name", "Unknown")} ({r.get("pitcher.id", "")})', axis=1
+                )
 
-                if selected_pitcher_ids:
-                    # Filter plays by pitcher id
+                pitcher_map = dict(zip(plays_df["pitcher_display"], plays_df["pitcher.id"]))
+                selected_pitchers = st.multiselect("Select Pitcher(s)", options=list(pitcher_map.keys()))
+
+                if selected_pitchers:
+                    selected_pitcher_ids = [pitcher_map[name] for name in selected_pitchers]
+
+                    # Filter plays by selected pitcher IDs
                     filtered_plays = plays_df[plays_df["pitcher.id"].isin(selected_pitcher_ids)]
 
-                    # Filter balls by kind='Pitch' and playId in filtered plays
+                    # Filter balls: kind == 'Pitch' AND playId in filtered plays' playID
                     filtered_balls = balls_df[
-                        (balls_df["kind"] == "Pitch") & 
-                        (balls_df["playId"].isin(filtered_plays["playID"]))
+                        (balls_df["kind"] == "Pitch") & (balls_df["playId"].isin(filtered_plays["playID"]))
                     ]
 
                     if filtered_plays.empty or filtered_balls.empty:
                         st.warning("No data found for selected pitcher(s) with kind 'Pitch'.")
                     else:
-                        # Merge with plays as left table and balls as right table
+                        # Merge plays (left) with balls (right) on playID
                         combined_df = pd.merge(
                             filtered_plays,
                             filtered_balls,
@@ -133,14 +143,17 @@ if date_from and date_to:
                             suffixes=("_play", "_ball")
                         )
 
-                        st.subheader("Combined Balls and Plays Data (Filtered by Pitcher ID)")
+                        # Sort by utcDateTime ascending (chronological)
+                        combined_df["utcDateTime"] = pd.to_datetime(combined_df["utcDateTime"])
+                        combined_df = combined_df.sort_values(by="utcDateTime")
+
+                        st.subheader("Combined Balls and Plays Data (Filtered by Pitcher)")
                         st.dataframe(combined_df)
 
                         csv = combined_df.to_csv(index=False)
                         st.download_button("Download Combined Data as CSV", csv, "trackman_combined_data.csv", "text/csv")
-
                 else:
-                    st.info("Select at least one pitcher ID to filter data.")
+                    st.info("Select at least one pitcher to filter data.")
 
         else:
-            st.warning("No 'Adhoc' sessions found in the selected date range.")
+            st.warning("No sessions found in the selected date range.")

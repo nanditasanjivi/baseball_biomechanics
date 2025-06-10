@@ -115,19 +115,22 @@ if date_from and date_to:
                     # Filter plays by pitcher id
                     filtered_plays = plays_df[plays_df["pitcher.id"].isin(selected_pitcher_ids)]
 
-                    # Filter balls by playId matching filtered plays' playID
-                    filtered_balls = balls_df[balls_df["playId"].isin(filtered_plays["playID"])]
+                    # Filter balls by kind='Pitch' and playId in filtered plays
+                    filtered_balls = balls_df[
+                        (balls_df["kind"] == "Pitch") & 
+                        (balls_df["playId"].isin(filtered_plays["playID"]))
+                    ]
 
                     if filtered_plays.empty or filtered_balls.empty:
-                        st.warning("No data found for selected pitcher(s).")
+                        st.warning("No data found for selected pitcher(s) with kind 'Pitch'.")
                     else:
-                        # Merge on playID key
+                        # Merge with plays as left table and balls as right table
                         combined_df = pd.merge(
-                            filtered_balls,
                             filtered_plays,
-                            left_on="playId",
-                            right_on="playID",
-                            suffixes=("_ball", "_play")
+                            filtered_balls,
+                            left_on="playID",
+                            right_on="playId",
+                            suffixes=("_play", "_ball")
                         )
 
                         st.subheader("Combined Balls and Plays Data (Filtered by Pitcher ID)")

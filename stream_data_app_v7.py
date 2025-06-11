@@ -93,7 +93,13 @@ if date_from and date_to:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-            sessions_df = sessions_df[(sessions_df['homeTeam_shortName'] == 'CSD_TRI') | (sessions_df['awayTeam_shortName'] == 'CSD_TRI')]
+            sessions_df = sessions_df[
+                sessions_df.apply(
+                    lambda row: row.get('homeTeam', {}).get('shortName') == 'CSD_TRI' or 
+                                row.get('awayTeam', {}).get('shortName') == 'CSD_TRI',
+                    axis=1
+                )
+            ]
             sessions_df["sessionDisplay"] = sessions_df.apply(
                 lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId'][:8]})",
                 axis=1
@@ -107,7 +113,7 @@ if date_from and date_to:
 
             if not play_df.empty and not ball_df.empty:
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
-                merged_df = pd.merge(play_df, ball_df, how="left", left_on="playID", right_on="playId")
+                merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
@@ -127,7 +133,7 @@ if date_from and date_to:
                     st.subheader("Pitch Charts")
 
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-                    plt.subplots_adjust(hspace=0.4, wspace=0.3)
+                    plt.subplots_adjust(hspace=0.5, wspace=0.4)
 
                     sns.histplot(filtered_df['pitch_release_relSpeed'], kde=True, ax=axs[0, 0])
                     axs[0, 0].set_title("Release Speed")

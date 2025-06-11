@@ -93,8 +93,8 @@ if date_from and date_to:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-            sessions_df = sessions_df[(sessions_df['homeTeam_shortName'] == 'CSD_TRI') | (sessions_df['awayTeam_shortName'] == 'CSD_TRI')]
-            sessions_df["display"] = sessions_df.apply(lambda row: f"{row['sessionId']} ({row.get('homeTeam_shortName', 'Unknown')} vs {row.get('awayTeam_shortName', 'Unknown')})", axis=1)
+            sessions_df = sessions_df[(sessions_df['homeTeam.shortName'] == 'CSD_TRI') | (sessions_df['awayTeam.shortName'] == 'CSD_TRI')]
+            sessions_df["display"] = sessions_df.apply(lambda row: f"{row['sessionId']} ({row.get('homeTeam.shortName', 'Unknown')} vs {row.get('awayTeam.shortName', 'Unknown')})", axis=1)
 
             session_display = st.selectbox("Select Session", sessions_df["display"])
             chosen_session_id = session_display.split()[0]

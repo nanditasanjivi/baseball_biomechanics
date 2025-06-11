@@ -93,24 +93,24 @@ if date_from and date_to:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-            sessions_df = sessions_df[(sessions_df['homeTeam.shortName'] == 'CSD_TRI') | (sessions_df['awayTeam.shortName'] == 'CSD_TRI')]
-            sessions_df["display"] = sessions_df.apply(lambda row: f"{row['sessionId']} ({row.get('homeTeam.shortName', 'Unknown')} vs {row.get('awayTeam.shortName', 'Unknown')})", axis=1)
+            sessions_df = sessions_df[(sessions_df['homeTeam_shortName'] == 'CSD_TRI') | (sessions_df['awayTeam_shortName'] == 'CSD_TRI')]
+            sessions_df["sessionDisplay"] = sessions_df.apply(
+                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId'][:8]})",
+                axis=1
+            )
 
-            session_display = st.selectbox("Select Session", sessions_df["display"])
-            chosen_session_id = session_display.split()[0]
+            session_display = st.selectbox("Select Session", sessions_df["sessionDisplay"])
+            chosen_session_id = session_display.split('(')[-1].split(')')[0]
 
             play_df = fetch_play_data(access_token, chosen_session_id)
             ball_df = fetch_ball_data(access_token, chosen_session_id)
 
             if not play_df.empty and not ball_df.empty:
-                # Filter and merge
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
-                merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
-
+                merged_df = pd.merge(play_df, ball_df, how="left", left_on="playID", right_on="playId")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
-                # Pitcher dropdown
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())
                 selected_pitcher_id = pitcher_display.split('(')[-1].replace(')', '').strip()

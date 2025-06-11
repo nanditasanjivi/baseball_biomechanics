@@ -113,7 +113,8 @@ if date_from and date_to:
 
             if not play_df.empty and not ball_df.empty:
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
-                merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
+                #merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
+                merged_df = pd.merge(play_df, ball_df, how="left", left_on="playID", right_on="playId")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df = merged_df.sort_values("utcDateTime")
 

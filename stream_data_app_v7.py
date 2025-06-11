@@ -20,7 +20,8 @@ def get_access_token():
         "client_secret": client_secret,
         "grant_type": "client_credentials"
     }
-    response = requests.post(auth_url, data=auth_data)
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    response = requests.post(auth_url, data=auth_data, headers=headers)
     if response.status_code == 200:
         return response.json()["access_token"]
     else:
@@ -65,7 +66,6 @@ def fetch_play_data(token, session_id):
 
 # Fetch balls
 @st.cache_data
-
 def fetch_ball_data(token, session_id):
     headers = {
         "Authorization": f"Bearer {token}",
@@ -93,7 +93,8 @@ if date_from and date_to:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-            sessions_df["display"] = sessions_df.apply(lambda row: f"{row['sessionId']} ({row.get('homeTeam_name', 'Unknown')} vs {row.get('awayTeam_name', 'Unknown')})", axis=1)
+            sessions_df = sessions_df[(sessions_df['homeTeam_shortName'] == 'CSD_TRI') | (sessions_df['awayTeam_shortName'] == 'CSD_TRI')]
+            sessions_df["display"] = sessions_df.apply(lambda row: f"{row['sessionId']} ({row.get('homeTeam_shortName', 'Unknown')} vs {row.get('awayTeam_shortName', 'Unknown')})", axis=1)
 
             session_display = st.selectbox("Select Session", sessions_df["display"])
             chosen_session_id = session_display.split()[0]
@@ -102,11 +103,10 @@ if date_from and date_to:
             ball_df = fetch_ball_data(access_token, chosen_session_id)
 
             if not play_df.empty and not ball_df.empty:
-                # Merge on playID
+                # Filter and merge
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
-                merged_df = pd.merge(play_df, ball_df, how="right", left_on="playID", right_on="playId")
+                merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
 
-                # Drop rows with missing pitcher ID
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
@@ -117,7 +117,7 @@ if date_from and date_to:
 
                 filtered_df = merged_df[merged_df['pitcher_id'] == selected_pitcher_id]
 
-                st.subheader("Filtered Plays and Balls Data")
+                st.subheader("Filtered Balls and Plays Data")
                 st.dataframe(filtered_df)
 
                 st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered.csv", "text/csv")
@@ -126,7 +126,8 @@ if date_from and date_to:
                 if not filtered_df.empty:
                     st.subheader("Pitch Charts")
 
-                    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+                    fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+                    plt.subplots_adjust(hspace=0.4, wspace=0.3)
 
                     sns.histplot(filtered_df['pitch_release_relSpeed'], kde=True, ax=axs[0, 0])
                     axs[0, 0].set_title("Release Speed")

@@ -84,8 +84,8 @@ def fetch_ball_data(token, session_id):
 st.title("TrackMan Game Data Explorer")
 
 # Step 1: Date Range
-date_from = st.date_input("Start Date", pd.to_datetime("2025-03-03"))
-date_to = st.date_input("End Date", pd.to_datetime("2025-03-30"))
+date_from = st.date_input("Start Date", pd.to_datetime("2025-01-03"))
+date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
 
 if date_from and date_to:
     access_token = get_access_token()
@@ -115,6 +115,7 @@ if date_from and date_to:
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
                 merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
+                merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
@@ -135,18 +136,27 @@ if date_from and date_to:
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
                     plt.subplots_adjust(hspace=0.5, wspace=0.4)
 
-                    sns.histplot(filtered_df['pitch_release_relSpeed'], kde=True, ax=axs[0, 0])
-                    axs[0, 0].set_title("Release Speed")
+                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', data=filtered_df, ax=axs[0, 0])
+                    axs[0, 0].set_title("Pitch Velocity (Release Speed)")
+                    axs[0, 0].tick_params(axis='x', rotation=45)
 
-                    sns.histplot(filtered_df['pitch_release_spinRate'], kde=True, ax=axs[0, 1])
+                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', data=filtered_df, ax=axs[0, 1])
                     axs[0, 1].set_title("Spin Rate")
+                    axs[0, 1].tick_params(axis='x', rotation=45)
 
-                    sns.scatterplot(x='pitch_location_plateLocSide', y='pitch_location_plateLocHeight', data=filtered_df, ax=axs[1, 0])
-                    axs[1, 0].set_title("Pitch Location (Side vs Height)")
-                    axs[1, 0].invert_yaxis()
+                    if 'hit_launchSpeed' in filtered_df.columns:
+                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', data=filtered_df, ax=axs[1, 0])
+                        axs[1, 0].set_title("Exit Velocity")
+                        axs[1, 0].tick_params(axis='x', rotation=45)
+                    else:
+                        axs[1, 0].set_visible(False)
 
-                    sns.histplot(filtered_df['pitch_effectiveVelo'], kde=True, ax=axs[1, 1])
-                    axs[1, 1].set_title("Effective Velocity")
+                    if 'hit_launchAngle' in filtered_df.columns:
+                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', data=filtered_df, ax=axs[1, 1])
+                        axs[1, 1].set_title("Launch Angle")
+                        axs[1, 1].tick_params(axis='x', rotation=45)
+                    else:
+                        axs[1, 1].set_visible(False)
 
                     st.pyplot(fig)
 

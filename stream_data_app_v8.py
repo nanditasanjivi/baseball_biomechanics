@@ -92,7 +92,10 @@ if date_from and date_to:
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
+            # Filter Adhoc sessions only
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
+
+            # Keep only sessions where CSD_TRI is home or away
             sessions_df = sessions_df[
                 sessions_df.apply(
                     lambda row: row.get('homeTeam', {}).get('shortName') == 'CSD_TRI' or 
@@ -100,8 +103,10 @@ if date_from and date_to:
                     axis=1
                 )
             ]
+
+            # Display format: Home vs Away (sessionId)
             sessions_df["sessionDisplay"] = sessions_df.apply(
-                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId']})",
+                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId'][:8]})",
                 axis=1
             )
 
@@ -113,15 +118,19 @@ if date_from and date_to:
 
             if not play_df.empty and not ball_df.empty:
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
+
+                # Merge ball and play data using playId
                 merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
+                # Format for pitcher dropdown
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())
                 selected_pitcher_id = pitcher_display.split('(')[-1].replace(')', '').strip()
 
+                # Filter by pitcher ID
                 filtered_df = merged_df[merged_df['pitcher_id'] == selected_pitcher_id]
 
                 st.subheader("Filtered Balls and Plays Data")
@@ -131,7 +140,7 @@ if date_from and date_to:
 
                 # Plotting
                 if not filtered_df.empty:
-                    st.subheader("Pitch Charts")
+                    st.subheader("Pitch Charts Over Time")
 
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
                     plt.subplots_adjust(hspace=0.5, wspace=0.4)

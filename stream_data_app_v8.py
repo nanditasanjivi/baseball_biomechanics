@@ -106,7 +106,7 @@ if date_from and date_to:
 
             # Display format: Home vs Away (sessionId)
             sessions_df["sessionDisplay"] = sessions_df.apply(
-                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId'][:8]})",
+                lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId']})",
                 axis=1
             )
 

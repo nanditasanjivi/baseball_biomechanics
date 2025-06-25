@@ -13,7 +13,7 @@ base_url = api_secrets["base_url"]
 session_query_url = api_secrets["session_query_url"]
 
 # Authenticate
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def get_access_token():
     auth_data = {
         "client_id": client_id,
@@ -29,7 +29,7 @@ def get_access_token():
         return None
 
 # Fetch session metadata
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def fetch_sessions(token, date_from, date_to):
     headers = {
         "Authorization": f"Bearer {token}",
@@ -49,8 +49,8 @@ def fetch_sessions(token, date_from, date_to):
         return pd.DataFrame()
 
 # Fetch plays
-@st.cache_data
-def fetch_play_data(token, session_id):
+@st.cache_data(show_spinner=False)
+def fetch_play_data(token, session_id: str):
     headers = {
         "Authorization": f"Bearer {token}",
         "accept": "application/json"
@@ -65,8 +65,8 @@ def fetch_play_data(token, session_id):
         return pd.DataFrame()
 
 # Fetch balls
-@st.cache_data
-def fetch_ball_data(token, session_id):
+@st.cache_data(show_spinner=False)
+def fetch_ball_data(token, session_id: str):
     headers = {
         "Authorization": f"Bearer {token}",
         "accept": "application/json"
@@ -116,21 +116,25 @@ if date_from and date_to:
 
             for session_display in session_display_multi:
                 session_id = session_display.split('(')[-1].split(')')[0]
+                st.write(f"Fetching session: {session_id}")
 
                 play_df = fetch_play_data(access_token, session_id)
                 ball_df = fetch_ball_data(access_token, session_id)
 
                 if not play_df.empty and not ball_df.empty:
                     ball_df = ball_df[ball_df['kind'] == 'Pitch']
-
                     merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
                     merged_df = merged_df.dropna(subset=["pitcher_id"])
                     merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                     merged_df["sessionId"] = session_id
+                    st.write(f"{session_id} - Rows merged: {merged_df.shape[0]}")
                     all_merged_dfs.append(merged_df)
+                else:
+                    st.warning(f"No data found for session: {session_id}")
 
             if all_merged_dfs:
                 merged_df_all = pd.concat(all_merged_dfs).sort_values("utcDateTime")
+                st.write(f"Total combined rows: {merged_df_all.shape[0]}")
 
                 merged_df_all['pitcher_display'] = merged_df_all['pitcher_name'] + " (" + merged_df_all['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df_all['pitcher_display'].dropna().unique())

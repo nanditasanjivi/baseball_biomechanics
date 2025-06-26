@@ -92,10 +92,7 @@ if date_from and date_to:
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
-            # Filter Adhoc sessions only
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-
-            # Filter for sessions involving CSD_TRI
             sessions_df = sessions_df[
                 sessions_df.apply(
                     lambda row: row.get('homeTeam', {}).get('shortName') == 'CSD_TRI' or 
@@ -104,7 +101,6 @@ if date_from and date_to:
                 )
             ]
 
-            # Display format: Home vs Away (sessionId)
             sessions_df["sessionDisplay"] = sessions_df.apply(
                 lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId']})",
                 axis=1
@@ -130,6 +126,10 @@ if date_from and date_to:
             if all_merged_dfs:
                 merged_df_all = pd.concat(all_merged_dfs).sort_values("utcDateTime")
 
+                # Create continuous timeline
+                t0 = merged_df_all["utcDateTime"].min()
+                merged_df_all["relativeTime"] = (merged_df_all["utcDateTime"] - t0).dt.total_seconds()
+
                 merged_df_all['pitcher_display'] = merged_df_all['pitcher_name'] + " (" + merged_df_all['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df_all['pitcher_display'].dropna().unique())
                 selected_pitcher_id = pitcher_display.split('(')[-1].replace(')', '').strip()
@@ -142,30 +142,30 @@ if date_from and date_to:
                 st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered.csv", "text/csv")
 
                 if not filtered_df.empty:
-                    st.subheader("Pitch Charts Over Time")
+                    st.subheader("Pitch Charts Over Continuous Time")
 
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
                     plt.subplots_adjust(hspace=0.5, wspace=0.4)
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', data=filtered_df, ax=axs[0, 0])
+                    sns.lineplot(x='relativeTime', y='pitch_release_relSpeed', data=filtered_df, ax=axs[0, 0])
                     axs[0, 0].set_title("Pitch Velocity (Release Speed)")
-                    axs[0, 0].tick_params(axis='x', rotation=45)
+                    axs[0, 0].set_xlabel("Time (s)")
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', data=filtered_df, ax=axs[0, 1])
+                    sns.lineplot(x='relativeTime', y='pitch_release_spinRate', data=filtered_df, ax=axs[0, 1])
                     axs[0, 1].set_title("Spin Rate")
-                    axs[0, 1].tick_params(axis='x', rotation=45)
+                    axs[0, 1].set_xlabel("Time (s)")
 
                     if 'hit_launchSpeed' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', data=filtered_df, ax=axs[1, 0])
+                        sns.lineplot(x='relativeTime', y='hit_launchSpeed', data=filtered_df, ax=axs[1, 0])
                         axs[1, 0].set_title("Exit Velocity")
-                        axs[1, 0].tick_params(axis='x', rotation=45)
+                        axs[1, 0].set_xlabel("Time (s)")
                     else:
                         axs[1, 0].set_visible(False)
 
                     if 'hit_launchAngle' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', data=filtered_df, ax=axs[1, 1])
+                        sns.lineplot(x='relativeTime', y='hit_launchAngle', data=filtered_df, ax=axs[1, 1])
                         axs[1, 1].set_title("Launch Angle")
-                        axs[1, 1].tick_params(axis='x', rotation=45)
+                        axs[1, 1].set_xlabel("Time (s)")
                     else:
                         axs[1, 1].set_visible(False)
 

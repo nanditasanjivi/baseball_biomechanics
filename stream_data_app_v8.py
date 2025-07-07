@@ -84,8 +84,8 @@ def fetch_ball_data(token, session_id):
 st.title("TrackMan Game Data Explorer")
 
 # Step 1: Date Range
-date_from = st.date_input("Start Date", pd.to_datetime("2025-01-03"))
-date_to = st.date_input("End Date", pd.to_datetime("2025-01-30"))
+date_from = st.date_input("Start Date", pd.to_datetime("2025-03-03"))
+date_to = st.date_input("End Date", pd.to_datetime("2025-03-30"))
 
 if date_from and date_to:
     access_token = get_access_token()

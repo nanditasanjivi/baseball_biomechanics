@@ -116,9 +116,9 @@ if date_from and date_to:
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                 merged_df = merged_df.sort_values("utcDateTime")
-                
-                # Create a standard pitch type column from play_df
-                merged_df['pitch_type'] = merged_df['pitchTag.taggedPitchType']
+
+                # Extract pitch type from nested pitchTag dictionary
+                merged_df['pitch_type'] = merged_df['pitchTag'].apply(lambda x: x.get('taggedPitchType') if isinstance(x, dict) else None)
 
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())

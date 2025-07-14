@@ -118,7 +118,7 @@ if date_from and date_to:
                 merged_df = merged_df.sort_values("utcDateTime")
 
                 # Extract pitch type from nested pitchTag dictionary
-                merged_df['pitch_type'] = merged_df['pitchTag'].apply(lambda x: x.get('taggedPitchType') if isinstance(x, dict) else None)
+                #merged_df['pitch_type'] = merged_df['pitchTag'].apply(lambda x: x.get('taggedPitchType') if isinstance(x, dict) else None)
 
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())
@@ -127,6 +127,7 @@ if date_from and date_to:
 
                 st.subheader("Filtered Balls and Plays Data")
                 st.dataframe(filtered_df)
+                st.write("Available columns in filtered_df:", filtered_df.columns.tolist())
                 st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered.csv", "text/csv")
 
                 if not filtered_df.empty:

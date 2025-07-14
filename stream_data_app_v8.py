@@ -92,10 +92,7 @@ if date_from and date_to:
     if access_token:
         sessions_df = fetch_sessions(access_token, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
         if not sessions_df.empty:
-            # Filter Adhoc sessions only
             sessions_df = sessions_df[sessions_df["sessionType"] == "Adhoc"]
-
-            # Keep only sessions where CSD_TRI is home or away
             sessions_df = sessions_df[
                 sessions_df.apply(
                     lambda row: row.get('homeTeam', {}).get('shortName') == 'CSD_TRI' or 
@@ -103,13 +100,10 @@ if date_from and date_to:
                     axis=1
                 )
             ]
-
-            # Display format: Home vs Away (sessionId)
             sessions_df["sessionDisplay"] = sessions_df.apply(
                 lambda row: f"{row.get('homeTeam', {}).get('name', 'Unknown')} vs {row.get('awayTeam', {}).get('name', 'Unknown')} ({row['sessionId']})",
                 axis=1
             )
-
             session_display = st.selectbox("Select Session", sessions_df["sessionDisplay"])
             chosen_session_id = session_display.split('(')[-1].split(')')[0]
 
@@ -118,57 +112,51 @@ if date_from and date_to:
 
             if not play_df.empty and not ball_df.empty:
                 ball_df = ball_df[ball_df['kind'] == 'Pitch']
-
-                # Merge ball and play data using playId
                 merged_df = pd.merge(ball_df, play_df, how="left", left_on="playId", right_on="playID")
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                 merged_df = merged_df.sort_values("utcDateTime")
 
-                # Format for pitcher dropdown
+                # Assign pitch type from known column
+                merged_df['pitch_type'] = merged_df['pitchTag_taggedPitchType']
+
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())
                 selected_pitcher_id = pitcher_display.split('(')[-1].replace(')', '').strip()
-
-                # Filter by pitcher ID
                 filtered_df = merged_df[merged_df['pitcher_id'] == selected_pitcher_id]
 
                 st.subheader("Filtered Balls and Plays Data")
                 st.dataframe(filtered_df)
-
                 st.download_button("Download CSV", filtered_df.to_csv(index=False), "filtered.csv", "text/csv")
 
-                # Plotting
                 if not filtered_df.empty:
                     st.subheader("Pitch Charts Over Time")
-
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
                     plt.subplots_adjust(hspace=0.5, wspace=0.4)
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', data=filtered_df, ax=axs[0, 0])
+                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', hue='pitch_type', data=filtered_df, ax=axs[0, 0])
                     axs[0, 0].set_title("Pitch Velocity (Release Speed)")
                     axs[0, 0].tick_params(axis='x', rotation=45)
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', data=filtered_df, ax=axs[0, 1])
+                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', hue='pitch_type', data=filtered_df, ax=axs[0, 1])
                     axs[0, 1].set_title("Spin Rate")
                     axs[0, 1].tick_params(axis='x', rotation=45)
 
                     if 'hit_launchSpeed' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', data=filtered_df, ax=axs[1, 0])
+                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', hue='pitch_type', data=filtered_df, ax=axs[1, 0])
                         axs[1, 0].set_title("Exit Velocity")
                         axs[1, 0].tick_params(axis='x', rotation=45)
                     else:
                         axs[1, 0].set_visible(False)
 
                     if 'hit_launchAngle' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', data=filtered_df, ax=axs[1, 1])
+                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', hue='pitch_type', data=filtered_df, ax=axs[1, 1])
                         axs[1, 1].set_title("Launch Angle")
                         axs[1, 1].tick_params(axis='x', rotation=45)
                     else:
                         axs[1, 1].set_visible(False)
 
                     st.pyplot(fig)
-
             else:
                 st.warning("No play or ball data found for this session.")
         else:

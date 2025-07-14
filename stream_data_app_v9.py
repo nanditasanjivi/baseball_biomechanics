@@ -116,6 +116,10 @@ if date_from and date_to:
                 merged_df = merged_df.dropna(subset=["pitcher_id"])
                 merged_df["utcDateTime"] = pd.to_datetime(merged_df["utcDateTime"])
                 merged_df = merged_df.sort_values("utcDateTime")
+                
+                # Create a standard pitch type column from play_df
+                merged_df['pitch_type'] = merged_df['pitchTag.taggedPitchType']
+
                 merged_df['pitcher_display'] = merged_df['pitcher_name'] + " (" + merged_df['pitcher_id'].astype(str) + ")"
                 pitcher_display = st.selectbox("Select Pitcher", merged_df['pitcher_display'].dropna().unique())
                 selected_pitcher_id = pitcher_display.split('(')[-1].replace(')', '').strip()
@@ -130,23 +134,23 @@ if date_from and date_to:
                     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
                     plt.subplots_adjust(hspace=0.5, wspace=0.4)
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', hue='pitchTag-taggedPitchType', data=filtered_df, ax=axs[0, 0])
+                    sns.lineplot(x='utcDateTime', y='pitch_release_relSpeed', hue='pitch_type', data=filtered_df, ax=axs[0, 0])
                     axs[0, 0].set_title("Pitch Velocity (Release Speed)")
                     axs[0, 0].tick_params(axis='x', rotation=45)
 
-                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', hue='pitchTag-taggedPitchType', data=filtered_df, ax=axs[0, 1])
+                    sns.lineplot(x='utcDateTime', y='pitch_release_spinRate', hue='pitch_type', data=filtered_df, ax=axs[0, 1])
                     axs[0, 1].set_title("Spin Rate")
                     axs[0, 1].tick_params(axis='x', rotation=45)
 
                     if 'hit_launchSpeed' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', hue='pitchTag-taggedPitchType', data=filtered_df, ax=axs[1, 0])
+                        sns.lineplot(x='utcDateTime', y='hit_launchSpeed', hue='pitch_type', data=filtered_df, ax=axs[1, 0])
                         axs[1, 0].set_title("Exit Velocity")
                         axs[1, 0].tick_params(axis='x', rotation=45)
                     else:
                         axs[1, 0].set_visible(False)
 
                     if 'hit_launchAngle' in filtered_df.columns:
-                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', hue='pitchTag-taggedPitchType', data=filtered_df, ax=axs[1, 1])
+                        sns.lineplot(x='utcDateTime', y='hit_launchAngle', hue='pitch_type', data=filtered_df, ax=axs[1, 1])
                         axs[1, 1].set_title("Launch Angle")
                         axs[1, 1].tick_params(axis='x', rotation=45)
                     else:
